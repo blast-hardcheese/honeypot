@@ -116,10 +116,18 @@ class ExampleFactory(factory.SSHFactory):
         'ssh-connection': connection.SSHConnection
     }
 
+class AllowAll(object):
+    class CredentialInterfaces(object):
+        def providedBy(self, *args, **kwargs):
+            return True
+
+    def requestAvatarId(self, credentials):
+        return ()
+
+    credentialInterfaces = [CredentialInterfaces()]
 
 portal = portal.Portal(ExampleRealm())
-passwdDB = checkers.InMemoryUsernamePasswordDatabaseDontUse()
-passwdDB.addUser('user', 'password')
+passwdDB = AllowAll()
 portal.registerChecker(passwdDB)
 portal.registerChecker(InMemoryPublicKeyChecker())
 ExampleFactory.portal = portal
