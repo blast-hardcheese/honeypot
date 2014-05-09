@@ -8,6 +8,7 @@ from twisted.conch import error, avatar
 from twisted.conch.checkers import SSHPublicKeyDatabase
 from twisted.conch.ssh import factory, userauth, connection, keys, session
 from twisted.internet import reactor, protocol, defer
+from twisted.internet.endpoints import TCP4ClientEndpoint
 from twisted.python import log
 from zope.interface import implements
 import sys
@@ -31,17 +32,6 @@ class ExampleRealm:
     def requestAvatar(self, avatarId, mind, *interfaces):
         return interfaces[0], ExampleAvatar(avatarId), lambda: None
 
-class EchoProtocol(protocol.Protocol):
-    """this is our example protocol that we will run over SSH
-    """
-    def dataReceived(self, data):
-        if data == '\r':
-            data = '\r\n'
-        elif data == '\x03': #^C
-            self.transport.loseConnection()
-            return
-        self.transport.write(data)
-
 publicKey = 'ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAGEArzJx8OYOnJmzf4tfBEvLi8DVPrJ3/c9k2I/Az64fxjHf9imyRJbixtQhlH9lfNjUIx+4LmrJH5QNRsFporcHDKOTwTTYLh5KmRpslkYHRivcJSkbh/C+BR3utDS555mV'
 
 privateKey = """-----BEGIN RSA PRIVATE KEY-----
@@ -64,6 +54,22 @@ class InMemoryPublicKeyChecker(SSHPublicKeyDatabase):
         return credentials.username == 'user' and \
             keys.Key.fromString(data=publicKey).blob() == credentials.blob
 
+class PassthroughProtocol(protocol.Protocol):
+    def dataReceived(self, data):
+        self.transport.write(data)
+
+class LoggingTransport(object):
+    def __init__(self, session):
+        self.session = session
+        self.buff = []
+
+    def write(self, data):
+        if data == '\r':
+            print repr(''.join(self.buff))
+            self.buff = list()
+        else:
+            self.buff.append(data)
+
 class ExampleSession:
 
     def __init__(self, avatar):
@@ -79,9 +85,15 @@ class ExampleSession:
         raise Exception("no executing commands")
 
     def openShell(self, trans):
-        ep = EchoProtocol()
-        ep.makeConnection(trans)
-        trans.makeConnection(session.wrapProtocol(ep))
+        host,port = 'towel.blinkenlights.nl', 23
+        timeout = 10
+
+        def gotProtocol(p):
+            p.makeConnection(trans)
+            trans.makeConnection(LoggingTransport(self))
+
+        c = protocol.ClientCreator(reactor, PassthroughProtocol)
+        c.connectTCP(host, port).addCallback(gotProtocol)
 
     def eofReceived(self):
         pass
